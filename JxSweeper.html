@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JxSweeper v1.0 - @Jelikton</title>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --terminal-bg: #0a0a0a;
+            --main-color: #00ff41; /* Hacker Green */
+            --glow-color: rgba(0, 255, 65, 0.5);
+            --accent-color: #ff003c; /* Cyberpunk Red */
+            --cell-base: #222;
+            --cell-light: #444;
+            --cell-shadow: #000;
+            --font-main: 'Courier New', Courier, monospace;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--main-color);
+            font-family: var(--font-main);
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* --- CRT EFFECTS --- */
+        body::before {
+            content: " "; display: block; position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 4px; z-index: 999; pointer-events: none;
+        }
+        body::after {
+            content: " "; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            box-shadow: inset 0 0 150px rgba(0,0,0,1); z-index: 998; pointer-events: none;
+        }
+
+        /* --- BACKGROUND --- */
+        #hacker-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.3; }
+
+        /* --- LAYOUT SYSTEM --- */
+        .screen {
+            position: absolute; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10;
+        }
+
+        /* --- MENU --- */
+        #menu-screen {
+            flex-direction: column;
+            background: rgba(5, 5, 5, 0.85);
+            backdrop-filter: blur(5px);
+        }
+
+        .panel {
+            background: var(--terminal-bg);
+            border: 2px solid var(--main-color);
+            box-shadow: 0 0 30px var(--glow-color);
+            padding: 40px; text-align: center; position: relative;
+        }
+        
+        h1 {
+            font-size: 3.5em; margin: 0;
+            text-shadow: 0 0 10px var(--main-color);
+            letter-spacing: 5px;
+        }
+        .subtitle {
+            background: var(--main-color); color: #000;
+            font-weight: bold; padding: 2px 10px; margin-bottom: 25px; display: inline-block;
+        }
+
+        .btn-group { display: flex; flex-direction: column; gap: 12px; width: 280px; margin: 0 auto; }
+
+        button {
+            background: rgba(0,0,0,0.5);
+            border: 1px solid #444; color: #888;
+            padding: 12px; font-family: inherit; font-size: 1.1em;
+            cursor: pointer; transition: 0.2s; text-transform: uppercase; font-weight: bold;
+        }
+        button:hover, button.active {
+            border-color: var(--main-color); color: var(--main-color);
+            box-shadow: 0 0 10px var(--glow-color); transform: scale(1.02);
+        }
+        button.impossible:hover { border-color: var(--accent-color); color: var(--accent-color); box-shadow: 0 0 10px var(--accent-color); }
+        
+        .start-btn {
+            margin-top: 15px; border: 2px solid var(--main-color);
+            background: var(--main-color); color: #000;
+        }
+        .start-btn:hover { background: #fff; color: #000; box-shadow: 0 0 25px var(--main-color); }
+
+        /* --- GAME UI --- */
+        #game-screen { display: none; flex-direction: row; }
+        
+        .game-board { flex: 1; display: flex; align-items: center; justify-content: center; }
+
+        .sidebar {
+            width: 300px; background: rgba(10, 10, 10, 0.95);
+            border-left: 2px solid var(--main-color);
+            padding: 20px; display: flex; flex-direction: column; gap: 20px; z-index: 20;
+        }
+
+        /* --- GRID & CELLS (FIXED PHYSICS) --- */
+        #grid {
+            display: grid; padding: 10px;
+            background: #111; border: 2px solid #333;
+            box-shadow: 10px 10px 0 #000;
+        }
+
+        .cell {
+            width: var(--cell-size); height: var(--cell-size);
+            background: var(--cell-base);
+            
+            /* 3D Bevel Effect (Выпуклость) */
+            border-top: 3px solid var(--cell-light);
+            border-left: 3px solid var(--cell-light);
+            border-bottom: 3px solid var(--cell-shadow);
+            border-right: 3px solid var(--cell-shadow);
+            
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; cursor: pointer;
+            box-sizing: border-box; /* Важно для рамок */
+        }
+
+        .cell:hover {
+            filter: brightness(1.2); /* Просто подсветка, без смещения */
+        }
+
+        .cell:active {
+            /* Эффект нажатия */
+            border: 1px solid #333;
+            background: #1a1a1a;
+        }
+
+        .cell.revealed {
+            /* Вдавленное состояние */
+            border: 1px solid #333;
+            background: #000;
+            cursor: default;
+        }
+
+        .cell.flagged { color: var(--accent-color); }
+        .cell.mine { background: var(--accent-color); color: #fff; border: 1px solid #500; }
+
+        /* Numbers */
+        .c-1 { color: #5555ff; } .c-2 { color: #00aa00; } .c-3 { color: #ff5555; }
+        .c-4 { color: #aa00aa; } .c-5 { color: #ffaa00; } .c-6 { color: #00aaaa; }
+
+        /* --- MODAL (GAME OVER) --- */
+        #modal-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: none; align-items: center; justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(2px);
+        }
+        
+        .modal-box {
+            background: #000; border: 2px solid #fff;
+            padding: 30px 50px; text-align: center;
+            box-shadow: 0 0 50px rgba(255, 255, 255, 0.1);
+            max-width: 400px;
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .modal-box.win { border-color: var(--main-color); box-shadow: 0 0 30px var(--main-color); }
+        .modal-box.lose { border-color: var(--accent-color); box-shadow: 0 0 30px var(--accent-color); }
+
+        .modal-title { font-size: 2.5em; margin-bottom: 10px; font-weight: 900; }
+        .win .modal-title { color: var(--main-color); }
+        .lose .modal-title { color: var(--accent-color); text-shadow: 0 0 10px var(--accent-color); }
+
+        .modal-msg { margin-bottom: 20px; color: #aaa; }
+        
+        .modal-btns { display: flex; gap: 15px; justify-content: center; }
+        .modal-btns button { width: 120px; }
+
+        /* Stats in sidebar */
+        .stats { border: 1px dashed #333; padding: 15px; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; color: #888; }
+        .stat-val { color: #fff; font-weight: bold; }
+
+        .lb-list { list-style: none; padding: 0; font-size: 0.85em; color: #666; }
+        .lb-item { display: flex; justify-content: space-between; border-bottom: 1px solid #222; padding: 2px 0; }
+
+        @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+    </style>
+</head>
+<body>
+
+    <canvas id="hacker-bg"></canvas>
+
+    <!-- MENU SCREEN -->
+    <div id="menu-screen" class="screen">
+        <div class="panel">
+            <h1>JxSWEEPER</h1>
+            <div class="subtitle">MADE BY JELIKTON</div>
+
+            <div class="btn-group">
+                <button class="active" onclick="setDifficulty('easy', this)">EASY [Secured]</button>
+                <button onclick="setDifficulty('medium', this)">MEDIUM [Suspicious]</button>
+                <button onclick="setDifficulty('hard', this)">HARD [Compromised]</button>
+                <button class="impossible" onclick="setDifficulty('impossible', this)">IMPOSSIBLE [FATAL]</button>
+                
+                <button class="start-btn" onclick="initSystem()">INITIALIZE SYSTEM</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="game-screen" class="screen">
+        <div class="game-board">
+            <div id="grid"></div>
+        </div>
+
+        <div class="sidebar">
+            <h2 style="margin:0; text-align:center; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">SYSTEM STATUS</h2>
+            
+            <div class="stats">
+                <div class="stat-row"><span>MODE:</span> <span id="s-diff" class="stat-val">EASY</span></div>
+                <div class="stat-row"><span>TIME:</span> <span id="s-time" class="stat-val">00:00</span></div>
+                <div class="stat-row"><span>FLAGS:</span> <span id="s-flags" class="stat-val">0</span></div>
+                <div class="stat-row"><span>MINES:</span> <span id="s-mines" class="stat-val">0</span></div>
+            </div>
+
+            <button onclick="restartGame()">REBOOT (R)</button>
+            <button onclick="AudioEngine.toggleMute()" id="mute-btn">AUDIO: ON</button>
+            <button onclick="exitMenu()" style="border-color:#555; color:#555;">ABORT / EXIT</button>
+
+            <div style="flex:1; border-top:1px solid #333; padding-top:10px;">
+                <div style="text-align:center; color:#aaa; margin-bottom:5px;">DATABASE</div>
+                <ul id="lb-list" class="lb-list"></ul>
+            </div>
+
+            <div style="font-size:0.7em; text-align:center; color:#444;">
+                JxSweeper v1.0 @jxtec<br>Dev: Jelikton
+            </div>
+        </div>
+    </div>
+
+    <!-- CUSTOM MODAL (NO ALERTS) -->
+    <div id="modal-overlay">
+        <div id="modal-box" class="modal-box">
+            <div class="modal-title" id="m-title">SYSTEM FAILURE</div>
+            <div class="modal-msg" id="m-msg">Connection lost...</div>
+            <div class="modal-btns">
+                <button onclick="restartGame()">RETRY</button>
+                <button onclick="exitMenu()">MENU</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    /* 
+    ========================================================================
+    JxAudio Engine (Sequencer)
+    ========================================================================
+    */
+    const AudioEngine = {
+        ctx: null, masterGain: null,
+        isPlaying: false, isMuted: false,
+        timerID: null, trackType: 'lobby',
+        bpm: 120, nextNoteTime: 0, noteIndex: 0,
+
+        init() {
+            if (!this.ctx) {
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioContext();
+                this.masterGain = this.ctx.createGain();
+                this.masterGain.gain.value = 0.25;
+                this.masterGain.connect(this.ctx.destination);
+            }
+            if(this.ctx.state === 'suspended') this.ctx.resume();
+        },
+
+        playTone(freq, time, type='sine', dur=0.1, vol=0.1) {
+            const osc = this.ctx.createOscillator();
+            const g = this.ctx.createGain();
+            osc.type = type; osc.frequency.value = freq;
+            g.gain.setValueAtTime(vol, time);
+            g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+            osc.connect(g); g.connect(this.masterGain);
+            osc.start(time); osc.stop(time + dur);
+        },
+
+        playNoise(time, dur=0.1, vol=0.2) {
+            const bSize = this.ctx.sampleRate * dur;
+            const buf = this.ctx.createBuffer(1, bSize, this.ctx.sampleRate);
+            const data = buf.getChannelData(0);
+            for(let i=0; i<bSize; i++) data[i] = Math.random()*2-1;
+            const src = this.ctx.createBufferSource();
+            src.buffer = buf;
+            const g = this.ctx.createGain();
+            const f = this.ctx.createBiquadFilter();
+            f.type = 'lowpass'; f.frequency.value = 1000;
+            g.gain.setValueAtTime(vol, time);
+            g.gain.exponentialRampToValueAtTime(0.001, time+dur);
+            src.connect(f); f.connect(g); g.connect(this.masterGain);
+            src.start(time);
+        },
+
+        schedule(time) {
+            const beat = this.noteIndex % 16;
+            
+            if(this.trackType === 'lobby') {
+                if(beat % 4 === 0) this.playTone(55, time, 'sawtooth', 0.5, 0.15); // Drone
+                if(Math.random()>0.8 && beat%2===0) this.playTone(880, time, 'sine', 0.1, 0.05); // Bleeps
+            }
+            else if(this.trackType === 'game') {
+                // Kick
+                if(beat % 4 === 0) {
+                    this.playTone(100, time, 'sine', 0.1, 0.4);
+                    this.playTone(50, time, 'square', 0.1, 0.1); // Sub
+                }
+                // Hihat
+                if(beat % 2 === 0) this.playNoise(time, 0.05, 0.1);
+                // Bass
+                const bassNotes = [110, 0, 110, 0, 130, 0, 98, 0];
+                const note = bassNotes[beat % 8];
+                if(note) this.playTone(note, time, 'sawtooth', 0.2, 0.15);
+            }
+        },
+
+        loop() {
+            const lookahead = 0.1;
+            while(this.nextNoteTime < this.ctx.currentTime + lookahead) {
+                this.schedule(this.nextNoteTime);
+                const secondsPerBeat = 60.0 / this.bpm;
+                this.nextNoteTime += 0.25 * secondsPerBeat; // 16th notes
+                this.noteIndex++;
+            }
+            this.timerID = requestAnimationFrame(this.loop.bind(this));
+        },
+
+        start(track, bpm) {
+            this.init();
+            this.trackType = track;
+            this.bpm = bpm;
+            if(!this.isPlaying) {
+                this.isPlaying = true;
+                this.noteIndex = 0;
+                this.nextNoteTime = this.ctx.currentTime;
+                this.loop();
+            }
+        },
+
+        stop() {
+            this.isPlaying = false;
+            cancelAnimationFrame(this.timerID);
+        },
+
+        toggleMute() {
+            this.isMuted = !this.isMuted;
+            if(this.masterGain) this.masterGain.gain.value = this.isMuted ? 0 : 0.25;
+            document.getElementById('mute-btn').innerText = this.isMuted ? "AUDIO: OFF" : "AUDIO: ON";
+            document.getElementById('mute-btn').style.color = this.isMuted ? "#555" : "var(--main-color)";
+        },
+
+        playSFX(type) {
+            if(!this.ctx || this.isMuted) return;
+            const t = this.ctx.currentTime;
+            if(type==='click') this.playTone(1200, t, 'sine', 0.05, 0.1);
+            if(type==='flag') this.playTone(400, t, 'square', 0.05, 0.1);
+            if(type==='win') {
+                [523,659,784,1046].forEach((f,i)=>this.playTone(f, t+i*0.1, 'triangle', 0.3, 0.2));
+            }
+            if(type==='lose') {
+                this.playNoise(t, 0.5, 0.5);
+                this.playTone(50, t, 'sawtooth', 0.5, 0.3);
+            }
+        }
+    };
+
+    /* 
+    ========================================================================
+    VISUALS (Matrix BG)
+    ========================================================================
+    */
+    const cvs = document.getElementById('hacker-bg');
+    const ctx = cvs.getContext('2d');
+    let cw, ch, cols=[];
+    function resize() {
+        cw=cvs.width=window.innerWidth; ch=cvs.height=window.innerHeight;
+        cols = Array(Math.floor(cw/15)).fill(0).map(()=>Math.random()*ch);
+    }
+    window.onresize = resize; resize();
+    function draw() {
+        ctx.fillStyle='rgba(0,0,0,0.1)'; ctx.fillRect(0,0,cw,ch);
+        ctx.fillStyle='#0f0'; ctx.font='12px monospace';
+        cols.forEach((y,i)=>{
+            const char = String.fromCharCode(0x30A0+Math.random()*96);
+            ctx.fillStyle = Math.random()>0.95 ? '#fff':'#004400';
+            ctx.fillText(char, i*15, y);
+            cols[i] = (y>ch && Math.random()>0.98) ? 0 : y+15;
+        });
+        requestAnimationFrame(draw);
+    }
+    draw();
+
+    /* 
+    ========================================================================
+    GAME LOGIC
+    ========================================================================
+    */
+    const CFG = {
+        easy: {r:9, c:9, m:10, bpm:100},
+        medium: {r:16, c:16, m:40, bpm:120},
+        hard: {r:16, c:30, m:99, bpm:140},
+        impossible: {r:20, c:30, m:170, bpm:160}
+    };
+
+    let G = { 
+        grid:[], r:0, c:0, m:0, flags:0, 
+        active:false, first:true, diff:'easy', 
+        t_start:0, t_int:null 
+    };
+
+    let selDiff = 'easy';
+
+    function setDifficulty(diff, btn) {
+        selDiff = diff;
+        document.querySelectorAll('.btn-group button').forEach(b=>b.classList.remove('active'));
+        if(btn) btn.classList.add('active');
+        AudioEngine.playSFX('click');
+    }
+
+    function initSystem() {
+        AudioEngine.init();
+        AudioEngine.playSFX('click');
+        document.getElementById('menu-screen').style.display='none';
+        document.getElementById('game-screen').style.display='flex';
+        startGame(selDiff);
+    }
+
+    function exitMenu() {
+        closeModal();
+        G.active = false;
+        clearInterval(G.t_int);
+        AudioEngine.start('lobby', 80);
+        document.getElementById('game-screen').style.display='none';
+        document.getElementById('menu-screen').style.display='flex';
+    }
+
+    function startGame(diff) {
+        closeModal();
+        const cfg = CFG[diff];
+        G.r = cfg.r; G.c = cfg.c; G.m = cfg.m; G.diff = diff;
+        G.flags = 0; G.active = true; G.first = true; G.grid = [];
+        
+        if(G.t_int) clearInterval(G.t_int);
+        
+        document.getElementById('s-diff').innerText = diff.toUpperCase();
+        document.getElementById('s-mines').innerText = G.m;
+        document.getElementById('s-flags').innerText = 0;
+        document.getElementById('s-time').innerText = "00:00";
+        
+        AudioEngine.start('game', cfg.bpm);
+
+        const gel = document.getElementById('grid');
+        gel.innerHTML = '';
+        gel.style.gridTemplateColumns = `repeat(${G.c}, 1fr)`;
+        
+        let sz = 30;
+        if(diff==='hard') sz=25; if(diff==='impossible') sz=22;
+        document.documentElement.style.setProperty('--cell-size', sz+'px');
+
+        for(let r=0; r<G.r; r++) {
+            G.grid[r] = [];
+            for(let c=0; c<G.c; c++) {
+                const d = document.createElement('div');
+                d.className = 'cell';
+                d.onmouseup = (e) => handleMouse(e, r, c);
+                d.oncontextmenu = (e) => e.preventDefault();
+                gel.appendChild(d);
+                G.grid[r][c] = { r, c, isMine:false, rev:false, flag:false, val:0, el:d };
+            }
+        }
+        loadDB();
+    }
+
+    function handleMouse(e, r, c) {
+        if(!G.active) return;
+        if(e.button===0) click(r, c);
+        else if(e.button===2) flag(r, c);
+    }
+
+    function click(r, c) {
+        const cell = G.grid[r][c];
+        if(cell.flag || cell.rev) return;
+
+        if(G.first) {
+            G.first = false;
+            G.t_start = Date.now();
+            G.t_int = setInterval(tick, 1000);
+            genMines(r, c);
+        }
+
+        if(cell.isMine) {
+            die(r, c);
+        } else {
+            AudioEngine.playSFX('click');
+            reveal(r, c);
+            checkWin();
+        }
+    }
+
+    function flag(r, c) {
+        const cell = G.grid[r][c];
+        if(cell.rev) return;
+        cell.flag = !cell.flag;
+        cell.el.classList.toggle('flagged');
+        cell.el.innerText = cell.flag ? 'F' : '';
+        G.flags += cell.flag ? 1 : -1;
+        document.getElementById('s-flags').innerText = G.flags;
+        AudioEngine.playSFX('flag');
+    }
+
+    function genMines(safeR, safeC) {
+        let placed = 0;
+        const isSafe = (r,c) => Math.abs(r-safeR)<=1 && Math.abs(c-safeC)<=1;
+        while(placed < G.m) {
+            let rr=Math.floor(Math.random()*G.r), cc=Math.floor(Math.random()*G.c);
+            if(!G.grid[rr][cc].isMine && !isSafe(rr,cc)) {
+                G.grid[rr][cc].isMine = true;
+                placed++;
+            }
+        }
+        for(let r=0; r<G.r; r++) {
+            for(let c=0; c<G.c; c++) {
+                if(!G.grid[r][c].isMine) {
+                    let n=0;
+                    for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++)
+                        if(G.grid[r+i]?.[c+j]?.isMine) n++;
+                    G.grid[r][c].val = n;
+                }
+            }
+        }
+    }
+
+    function reveal(r, c) {
+        const cell = G.grid[r]?.[c];
+        if(!cell || cell.rev || cell.flag) return;
+        cell.rev = true;
+        cell.el.classList.add('revealed');
+        if(cell.val>0) {
+            cell.el.innerText = cell.val;
+            cell.el.classList.add('c-'+cell.val);
+        } else {
+            for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) reveal(r+i, c+j);
+        }
+    }
+
+    /* --- GAME OVER HANDLERS --- */
+    function die(r, c) {
+        G.active = false;
+        clearInterval(G.t_int);
+        AudioEngine.playSFX('lose');
+        AudioEngine.stop(); // Stop music on death
+        
+        G.grid.flat().forEach(c => {
+            if(c.isMine) { c.el.classList.add('mine'); c.el.innerText='X'; }
+        });
+        if(r!==undefined) G.grid[r][c].el.style.backgroundColor = '#800';
+        
+        setTimeout(() => showModal(false), 500);
+    }
+
+    function checkWin() {
+        if(G.grid.flat().filter(c=>c.rev).length === (G.r*G.c - G.m)) {
+            G.active = false;
+            clearInterval(G.t_int);
+            AudioEngine.playSFX('win');
+            saveRec();
+            setTimeout(() => showModal(true), 300);
+        }
+    }
+
+    function showModal(win) {
+        const ol = document.getElementById('modal-overlay');
+        const box = document.getElementById('modal-box');
+        const title = document.getElementById('m-title');
+        const msg = document.getElementById('m-msg');
+
+        ol.style.display = 'flex';
+        box.className = win ? 'modal-box win' : 'modal-box lose';
+        title.innerText = win ? 'SYSTEM SECURED' : 'SYSTEM FAILURE';
+        msg.innerText = win ? 
+            `Threats neutralised in ${document.getElementById('s-time').innerText}` : 
+            'Critical error. Connection terminated.';
+    }
+
+    function closeModal() {
+        document.getElementById('modal-overlay').style.display = 'none';
+    }
+
+    function restartGame() {
+        startGame(G.diff);
+    }
+
+    function tick() {
+        const d = Math.floor((Date.now()-G.t_start)/1000);
+        document.getElementById('s-time').innerText = 
+            `${Math.floor(d/60).toString().padStart(2,'0')}:${(d%60).toString().padStart(2,'0')}`;
+    }
+
+    /* --- DB --- */
+    function saveRec() {
+        const t = Math.floor((Date.now()-G.t_start)/1000);
+        let db = JSON.parse(localStorage.getItem('jx5_rec')) || [];
+        db.push({date:new Date().toLocaleDateString(), time:t, diff:G.diff});
+        db.sort((a,b)=>a.time-b.time);
+        localStorage.setItem('jx5_rec', JSON.stringify(db.slice(0,5)));
+        loadDB();
+    }
+    function loadDB() {
+        const ul = document.getElementById('lb-list');
+        ul.innerHTML = '';
+        const db = JSON.parse(localStorage.getItem('jx5_rec')) || [];
+        const flt = db.filter(r=>r.diff===G.diff);
+        if(!flt.length) ul.innerHTML = '<li class="lb-item">NO DATA</li>';
+        flt.forEach((r,i)=> ul.innerHTML+=`<li class="lb-item"><span>#${i+1} ${r.date}</span><span>${r.time}s</span></li>`);
+    }
+
+    // Start Lobby music on first click anywhere if context not started
+    window.addEventListener('click', ()=>{ 
+        if(!AudioEngine.ctx) { AudioEngine.init(); AudioEngine.start('lobby', 80); } 
+    }, {once:true});
+
+</script>
+</body>
+</html>
